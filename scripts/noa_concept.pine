@@ -7,7 +7,8 @@ indicator("N/O-A Concept (2026 Version)", overlay = true, max_boxes_count = 500,
 // ==========================================
 // 1. TIMEFRAME CHECK
 // ==========================================
-is_valid_tf = not timeframe.isintraday or timeframe.multiplier >= 60
+// H1 and below are excluded. H4, D, W, M are active.
+is_valid_tf = not timeframe.isintraday or (timeframe.isintraday and timeframe.multiplier >= 240)
 if not is_valid_tf
     runtime.error("N/O-A Concept is only valid for H4 and higher timeframes. H1 and below are excluded.")
 
@@ -67,8 +68,8 @@ calculate_score(Area a, ModuleInfo m, bool dxy_bull_trend) =>
     if check_energy_filling(a)
         score += 1.0
     // DXY Correlation Penalty
-    corr_ok = a.is_bullish ? not dxy_bull_trend : dxy_bull_trend
-    if not corr_ok
+    dxy_corr_ok = a.is_bullish ? not dxy_bull_trend : dxy_bull_trend
+    if not dxy_corr_ok
         score -= 2.0
     score
 
@@ -150,8 +151,6 @@ detect_m4(Area a) =>
 // ==========================================
 int pivot_leg_min = input.int(7, "Min Pivot Leg Bars", minval = 1, group = "General Settings")
 string dxy_symbol = input.symbol("TVC:DXY", "DXY Symbol", group = "General Settings")
-color bull_color = input.color(color.new(color.blue, 90), "Bullish Area Color", group = "Visual Settings")
-color bear_color = input.color(color.new(color.red, 90), "Bearish Area Color", group = "Visual Settings")
 bool show_tpsl = input.bool(true, "Show TP/SL Levels", group = "Visual Settings")
 
 // ==========================================
@@ -232,13 +231,13 @@ if not na(active_area) and bar_index == active_area.end_index + 5
     // Draw Last Area (Old Area - O)
     if not na(last_area)
         boxes.push(box.new(last_area.start_index, last_area.start_price, last_area.end_index, last_area.end_price,
-          bgcolor = last_area.is_bullish ? color.new(color.gray, 90) : color.new(color.gray, 90),
+          bgcolor = na,
           border_color = color.gray,
           text = "OLD AREA (O)", text_size = size.small))
 
     // Draw Active Area (New Area - N)
     boxes.push(box.new(active_area.start_index, active_area.start_price, active_area.end_index, active_area.end_price,
-      bgcolor = active_area.is_bullish ? bull_color : bear_color,
+      bgcolor = na,
       border_color = active_area.is_bullish ? color.blue : color.red,
       text = "NEW AREA (N)", text_size = size.small))
 
@@ -255,8 +254,8 @@ if not na(active_area) and bar_index == active_area.end_index + 5
             dist = bar_index - mod.start_index
             sc = calculate_score(active_area, mod, dxy_b_trend)
             st = sc >= 9 ? "S+" : sc >= 7 ? "A+" : "B"
-            bg = st == "S+" ? color.new(color.green, 70) : st == "A+" ? color.new(color.yellow, 70) : color.new(color.gray, 80)
             txt = mod.mod_type + " " + st + " (" + str.tostring(sc) + "p)" + (dist >= 70 ? "\n70+ Bars" : "")
-            boxes.push(box.new(mod.start_index, mod.top, active_area.end_index, mod.bottom, bgcolor = bg, text = txt))
+            bdc = st == "S+" ? color.green : st == "A+" ? color.yellow : color.gray
+            boxes.push(box.new(mod.start_index, mod.top, active_area.end_index, mod.bottom, bgcolor = na, border_color = bdc, text = txt))
             if st == "S+" or st == "A+"
                 alert("N/O-A " + st + " Setup Detected!", alert.freq_once_per_bar_close)
