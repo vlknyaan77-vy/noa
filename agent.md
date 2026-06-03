@@ -92,3 +92,45 @@ Modüller yalnızca tek bir sefer kullanılabilir, reaksiyon veren modül tüket
 1.  [cite_start]**Rolün:** Sen bir N/O-A Strateji Uzmanısın ve Pine Script v6 tabanlı sistem mimarısın[cite: 1496].
 2.  [cite_start]**Analiz Yöntemin:** Verilen grafik verisi ve koordinatları, N/O-A kurallar bütününe göre algoritma gibi çalıştıracaksın[cite: 1497].
 3.  [cite_start]**Karar Mekanizman:** H1 ve altındaki yapılara yorum yapma[cite: 1498]. [cite_start]Önce Alanı (N/O) bul, %50 fakeout kontrolünü yap, mesafeyi (70 bar kuralı) ölç, enerji dolumunu incele, modülü tespit et, puanı hesapla ve eylem tipini net olarak öner[cite: 1498, 1499]. [cite_start]Kurallara uymayan hiçbir işleme onay verme[cite: 1499].
+🤖 GOOGLE JULES İÇİN N/O-A KODLAMA YOL HARİTASI
+FAZ 1: Temel Mimari ve Veri Yapıları (UDT)
+Zaman Dilimi Filtresi: timeframe.isintraday kullanılarak H1 altı grafiklerde kodun çalışması durdurulacak (H4, D, W, M aktif olacak).
+
+UDT Tanımlaması: Eski (O) ve Yeni (N) alanların verilerini hafızada tutmak için Pine Script v6 type objesi oluşturulacak (Değişkenler: start_price, end_price, start_index, is_bullish, strength_score, module_flags).
+
+Swing Tespiti: ta.pivothigh ve ta.pivotlow kullanılarak en az 7-8 mumluk gövde mesafesine sahip ana salınım (swing) noktaları dinamik olarak tespit edilecek.
+
+FAZ 2: Alan Geçiş Kuralları ve Katman Matematiği
+Kural 1 (%50 Fibo): Bir önceki alanın maksimum/minimum noktasına göre hesaplanan 0.50 Fibonacci seviyesine fitil atılması veya gövde kapanışı yapılması durumu Yeni Alan Onayı olarak koda eklenecek.
+
+Kural 2 (Modül Tepkisi): Fiyat 0.50'ye ulaşmasa bile, FAZ 3'te tanımlanan modüllerden birinden reaksiyon alırsa Yeni Alan Onayı tetiklenecek.
+
+Katman Çizimleri: Fiyatın durumuna göre 0 ile 1 arasına standart seviyeler (0.15, 0.25, 0.38, 0.50 vb.) yatay çizgiler veya kutular (box) ile çizdirilecek. 0-0.25 aralığı Katman 1 olarak vurgulanacak.
+
+FAZ 3: Modül Tespit Algoritmaları (M1 - M4)
+M1 (0.38 Modülü - 3 Puan): Alanın en uç tepe/dip mumunu bulacak, önünde en fazla 1 mum olma şartını kontrol edecek ve tüm mumu modül olarak işaretleyecek algoritma yazılacak.
+
+M2 (Wick Imbalance - 2 Puan): En dış sınır mumlarında, fitil uzunluğunun kendi gövdesinin veya çevresindeki fitillerin >1.5x katı olma şartı math.max ve math.min ile hesaplanıp tespit edilecek.
+
+M3 (FVG - 1 Puan): Yan yana 3 mum kuralında 1. mumun fitili ile 3. mumun fitili arasındaki boşluk ölçülecek.
+
+M4 (R.O.P - 0 Puan): Kırılan uç fitil koordinatları line.new ile sağa uzatılarak destekleyici bir filtre modülü olarak koda eklenecek.
+
+FAZ 4: Mesafe Disiplini ve Enerji Dolumu
+70 Bar Kuralı: Modül koordinatı ile aktif fiyat arasındaki yatay mesafe bar_index farkı ile ölçülecek. Mesafe > 70 ise Eylem 1 (Direkt Giriş) devre dışı bırakılacak.
+
+Enerji Dolumu Tespiti: Fiyatın modüle gelirken H1 ve üzeri zaman dilimlerinde 0 - 0.15 Fibonacci seviyeleri arasında kısa geri çekilmeler yapıp yapmadığı kontrol edilecek (+1 veya +2 puan eklenecek). Fiyat soluksuz geliyorsa uyarı verecek bir mekanizma yazılacak.
+
+FAZ 5: Kondisyon Puanlaması ve Karar Mekanizması
+Skorlama Fonksiyonu: Modül Tipi (M1=3p, M2=2p...), Zaman Dilimi (Haftalık=4p, Günlük=3p...), Katman (Katman 1=2p) ve Enerji Dolumu verileri toplanacak.
+
+Setup Sınıflandırması: Toplam puan >= 9 ise S+ Setup (Eylem 1 - Limit Emir), puan >= 7 ise A+ Setup (Eylem 2 - Onay Bekle) olarak etiketlenecek.
+
+DXY Ters Korelasyon Filtresi: request.security kullanılarak EURUSD, GBPUSD gibi paritelerde arka planda DXY grafiği okunacak ve ters korelasyon eşleşmesi doğrulanacak.
+
+FAZ 6: Risk Yönetimi ve Görselleştirme (UI)
+İdeal TP/SL Hesaplaması: Sinyal geldiğinde Katman 1'in dışı otomatik Stop Loss noktası olarak, bir önceki alanın ilgili modülü ise Take Profit noktası olarak haritaya işlenecek.
+
+Breakeven (Başa Baş): İşlem sıfıra sıfır girdiyse (sniper) TP'ye %30 yaklaştığında, normal girişse %70 yaklaştığında Stop Loss noktasını giriş fiyatına eşitleyen sanal bir takip mekanizması (trailing) oluşturulacak.
+
+Temizlik: Sadece aktif alanlar ve modüller gösterilecek; geçmiş verilerdeki grafik kirliliğini önlemek için box.delete ve label.delete kullanılacak.
