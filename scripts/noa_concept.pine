@@ -1,0 +1,293 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Google Jules (N/O-A Specialist)
+
+//@version=6
+indicator("N/O-A Concept (2026 Version)", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ==========================================
+// 1. TIMEFRAME CHECK
+// ==========================================
+// H1 and below are excluded. H4, D, W, M are active.
+is_valid_tf = not timeframe.isintraday or (timeframe.isintraday and timeframe.multiplier >= 240)
+if not is_valid_tf
+    runtime.error("N/O-A Concept is only valid for H4 and higher timeframes. H1 and below are excluded.")
+
+// ==========================================
+// 2. DATA STRUCTURES (UDT)
+// ==========================================
+
+type ModuleInfo
+    float top
+    float bottom
+    int start_index
+    string mod_type
+    int strength
+
+type Area
+    float start_price
+    float end_price
+    int start_index
+    int end_index
+    bool is_bullish
+    float fib_25
+    float fib_50
+    ModuleInfo[] modules
+
+// ==========================================
+// 3. CORE FUNCTIONS
+// ==========================================
+
+// Energy Filling Check
+check_energy_filling(Area a) =>
+    bool p_found = false
+    // Look at the last 20 bars of the area for counter-trend movement
+    for i = 0 to 20
+        idx = a.end_index - i
+        if idx < a.start_index
+            break
+        o = open[bar_index - idx]
+        c = close[bar_index - idx]
+        is_red = a.is_bullish ? c < o : c > o
+        if is_red
+            p_found := true
+            break
+    p_found
+
+// Scoring System
+calculate_score(Area a, ModuleInfo m, bool dxy_bull_trend) =>
+    float score = 0.0
+    // Timeframe Score
+    score += (timeframe.isweekly or timeframe.ismonthly ? 4.0 : timeframe.isdaily ? 3.0 : 2.0)
+    // Module Type Score
+    score += m.strength
+    // Layer Score (Katman 1: 0-0.25)
+    is_katman1 = a.is_bullish ? m.bottom <= a.fib_25 : m.top >= a.fib_25
+    if is_katman1
+        score += 2.0
+    // Energy Filling
+    if check_energy_filling(a)
+        score += 1.0
+    // DXY Correlation Penalty
+    dxy_corr_ok = a.is_bullish ? not dxy_bull_trend : dxy_bull_trend
+    if not dxy_corr_ok
+        score -= 2.0
+    score
+
+// Update Area Fibonacci Levels
+method update_fibs(Area self) =>
+    diff = math.abs(self.start_price - self.end_price)
+    mult = self.is_bullish ? 1 : -1
+    self.fib_25 := self.start_price + diff * 0.25 * mult
+    self.fib_50 := self.start_price + diff * 0.50 * mult
+
+// Module Detection: M1 (Extreme)
+detect_m1(Area a) =>
+    int idx_ext = a.start_index
+    float h_ext = high[bar_index - idx_ext]
+    float l_ext = low[bar_index - idx_ext]
+    int ov_count = 0
+    for i = 1 to 10
+        idx = idx_ext + i
+        if idx > a.end_index
+            break
+        if high[bar_index - idx] > l_ext and low[bar_index - idx] < h_ext
+            ov_count += 1
+    ModuleInfo res = na
+    if ov_count <= 1
+        res := ModuleInfo.new(h_ext, l_ext, idx_ext, "M1", 3)
+    res
+
+// Module Detection: M2 (Wick Imbalance)
+detect_m2(Area a) =>
+    m2_list = array.new<ModuleInfo>()
+    for i = a.start_index to math.min(a.start_index + 5, a.end_index)
+        h = high[bar_index - i]
+        l = low[bar_index - i]
+        o = open[bar_index - i]
+        c = close[bar_index - i]
+        body = math.abs(o - c)
+        if (h - math.max(o, c)) > body * 1.5 or (math.min(o, c) - l) > body * 1.5
+            m2_list.push(ModuleInfo.new(h, l, i, "M2", 2))
+    m2_list
+
+// Module Detection: M3 (FVG)
+detect_m3(Area a) =>
+    m3_list = array.new<ModuleInfo>()
+    if a.end_index - a.start_index >= 3
+        for i = a.start_index to a.end_index - 2
+            h1 = high[bar_index - i]
+            l1 = low[bar_index - i]
+            h3 = high[bar_index - (i + 2)]
+            l3 = low[bar_index - (i + 2)]
+            if a.is_bullish and l3 > h1
+                m3_list.push(ModuleInfo.new(l3, h1, i + 1, "M3", 1))
+            else if not a.is_bullish and h3 < l1
+                m3_list.push(ModuleInfo.new(l1, h3, i + 1, "M3", 1))
+    m3_list
+
+// Module Detection: M4 (R.O.P / Breaker)
+detect_m4(Area a) =>
+    ModuleInfo res = na
+    if a.end_index - a.start_index > 10
+        for i = a.start_index + 2 to a.end_index - 5
+            hb = high[bar_index - i]
+            lb = low[bar_index - i]
+            sw_idx = 0
+            for j = i + 1 to a.end_index
+                if (a.is_bullish and low[bar_index - j] < lb) or (not a.is_bullish and high[bar_index - j] > hb)
+                    sw_idx := j
+                    break
+            if sw_idx > 0
+                for k = sw_idx + 1 to a.end_index
+                    if (a.is_bullish and close[bar_index - k] > hb) or (not a.is_bullish and close[bar_index - k] < lb)
+                        res := ModuleInfo.new(hb, lb, i, "M4", 0)
+                        break
+                if not na(res)
+                    break
+    res
+
+// ==========================================
+// 4. INPUTS
+// ==========================================
+int pivot_leg_min = input.int(7, "Min Pivot Leg Bars", minval = 1, group = "General Settings")
+string dxy_symbol = input.symbol("TVC:DXY", "DXY Symbol", group = "General Settings")
+bool show_tpsl = input.bool(true, "Show TP/SL Levels", group = "Visual Settings")
+string table_pos = input.string("top_right", "Table Position", options = ["top_right", "top_left", "bottom_right", "bottom_left"], group = "Visual Settings")
+
+// ==========================================
+// 5. MAIN LOGIC
+// ==========================================
+
+var Area active_area = na
+var Area last_area = na
+
+ph = ta.pivothigh(5, 5)
+pl = ta.pivotlow(5, 5)
+var int lp_idx = 0
+var float lp_price = 0.0
+var bool lp_high = false
+
+if not na(ph) or not na(pl)
+    c_high = not na(ph)
+    c_price = c_high ? ph : pl
+    c_idx = bar_index - 5
+    if lp_idx != 0
+        if (c_idx - lp_idx) >= pivot_leg_min and c_high != lp_high
+            can_new_a = false
+            if not na(active_area)
+                if (active_area.is_bullish and not c_high) or (not active_area.is_bullish and c_high)
+                    if (active_area.is_bullish ? c_price <= active_area.fib_50 : c_price >= active_area.fib_50)
+                        can_new_a := true
+                else
+                    active_area.end_price := c_price
+                    active_area.end_index := c_idx
+                    active_area.update_fibs()
+            else
+                can_new_a := true
+
+            if can_new_a
+                last_area := active_area
+                active_area := Area.new(lp_price, c_price, lp_idx, c_idx, c_price > lp_price, 0.0, 0.0, array.new<ModuleInfo>())
+                active_area.update_fibs()
+
+                m1 = detect_m1(active_area)
+                if not na(m1)
+                    active_area.modules.push(m1)
+
+                m2s = detect_m2(active_area)
+                if array.size(m2s) > 0
+                    for m in m2s
+                        active_area.modules.push(m)
+
+                m3s = detect_m3(active_area)
+                if array.size(m3s) > 0
+                    for m in m3s
+                        active_area.modules.push(m)
+
+                m4 = detect_m4(active_area)
+                if not na(m4)
+                    active_area.modules.push(m4)
+    lp_idx := c_idx
+    lp_price := c_price
+    lp_high := c_high
+
+dxy_c = request.security(dxy_symbol, timeframe.period, close)
+dxy_b_trend = ta.sma(dxy_c, 10) > ta.sma(dxy_c, 20)
+
+var box[] boxes = array.new<box>()
+var line[] lines = array.new<line>()
+var label[] labels = array.new<label>()
+
+// Table Setup
+var table score_table = table.new(table_pos == "top_right" ? position.top_right : table_pos == "top_left" ? position.top_left : table_pos == "bottom_right" ? position.bottom_right : position.bottom_left, 6, 10, border_width = 1)
+
+update_table(Area a, bool dxy_b_trend) =>
+    table.clear(score_table, 0, 0, 5, 9)
+    // Headers
+    table.cell(score_table, 0, 0, "Module", bgcolor = color.gray, text_color = color.white)
+    table.cell(score_table, 1, 0, "Quality", bgcolor = color.gray, text_color = color.white)
+    table.cell(score_table, 2, 0, "Score", bgcolor = color.gray, text_color = color.white)
+    table.cell(score_table, 3, 0, "Dist.", bgcolor = color.gray, text_color = color.white)
+    table.cell(score_table, 4, 0, "Action", bgcolor = color.gray, text_color = color.white)
+
+    if array.size(a.modules) > 0
+        for i = 0 to math.min(array.size(a.modules) - 1, 8)
+            mod = array.get(a.modules, i)
+            dist = bar_index - mod.start_index
+            sc = calculate_score(a, mod, dxy_b_trend)
+            st = sc >= 9 ? "S+" : sc >= 7 ? "A+" : "B"
+            action = sc >= 9 ? "EYLEM 1" : sc >= 7 ? "EYLEM 2" : "WAIT"
+            bg_color = st == "S+" ? color.new(color.green, 70) : st == "A+" ? color.new(color.yellow, 70) : color.new(color.gray, 80)
+
+            table.cell(score_table, 0, i + 1, mod.mod_type, bgcolor = bg_color)
+            table.cell(score_table, 1, i + 1, st, bgcolor = bg_color)
+            table.cell(score_table, 2, i + 1, str.tostring(sc), bgcolor = bg_color)
+            table.cell(score_table, 3, i + 1, str.tostring(dist), bgcolor = bg_color)
+            table.cell(score_table, 4, i + 1, action, bgcolor = bg_color)
+
+cleanup_ui() =>
+    if array.size(boxes) > 40
+        box.delete(array.shift(boxes))
+    if array.size(lines) > 40
+        line.delete(array.shift(lines))
+    if array.size(labels) > 40
+        label.delete(array.shift(labels))
+
+// Always update the table if an area is active to keep distance and score live
+if not na(active_area)
+    update_table(active_area, dxy_b_trend)
+
+if not na(active_area) and bar_index == active_area.end_index + 5
+    cleanup_ui()
+
+    // Draw Last Area (Old Area - O)
+    if not na(last_area)
+        boxes.push(box.new(last_area.start_index, last_area.start_price, last_area.end_index, last_area.end_price,
+          bgcolor = na,
+          border_color = color.gray,
+          text = "OLD AREA (O)", text_size = size.small))
+
+    // Draw Active Area (New Area - N)
+    boxes.push(box.new(active_area.start_index, active_area.start_price, active_area.end_index, active_area.end_price,
+      bgcolor = na,
+      border_color = active_area.is_bullish ? color.blue : color.red,
+      text = "NEW AREA (N)", text_size = size.small))
+
+    // 50%
+    lines.push(line.new(active_area.start_index, active_area.fib_50, active_area.end_index, active_area.fib_50, color=color.gray, style=line.style_dashed))
+    // TP/SL
+    if show_tpsl
+        sl_p = active_area.start_price
+        lines.push(line.new(active_area.end_index, sl_p, active_area.end_index + 20, sl_p, color=color.red, width=2))
+        labels.push(label.new(active_area.end_index + 20, sl_p, "SL", color=color.red, textcolor=color.white, style=label.style_label_left))
+
+    // Modules
+    if array.size(active_area.modules) > 0
+        for mod in active_area.modules
+            dist = bar_index - mod.start_index
+            sc = calculate_score(active_area, mod, dxy_b_trend)
+            st = sc >= 9 ? "S+" : sc >= 7 ? "A+" : "B"
+            bdc = st == "S+" ? color.green : st == "A+" ? color.yellow : color.gray
+            boxes.push(box.new(mod.start_index, mod.top, active_area.end_index, mod.bottom, bgcolor = na, border_color = bdc, text = mod.mod_type))
+            if st == "S+" or st == "A+"
+                alert("N/O-A " + st + " Setup Detected!", alert.freq_once_per_bar_close)
