@@ -58,14 +58,12 @@ method update_fibs(Area self) =>
 // ==========================================
 // 3. GLOBAL INPUTS
 // ==========================================
-group "General Settings"
-    int pivot_leg_min = input.int(7, "Min Pivot Leg Bars", minval = 1)
-    string dxy_symbol = input.symbol("TVC:DXY", "DXY Symbol")
+int pivot_leg_min = input.int(7, "Min Pivot Leg Bars", minval = 1, group = "General Settings")
+string dxy_symbol = input.symbol("TVC:DXY", "DXY Symbol", group = "General Settings")
 
-group "Visual Settings"
-    color bull_area_color = input.color(color.new(color.blue, 90), "Bullish Area Color")
-    color bear_area_color = input.color(color.new(color.red, 90), "Bearish Area Color")
-    bool show_tp_sl = input.bool(true, "Show TP/SL Levels")
+color bull_area_color = input.color(color.new(color.blue, 90), "Bullish Area Color", group = "Visual Settings")
+color bear_area_color = input.color(color.new(color.red, 90), "Bearish Area Color", group = "Visual Settings")
+bool show_tp_sl = input.bool(true, "Show TP/SL Levels", group = "Visual Settings")
 
 // ==========================================
 // 5. MODULE DETECTION ALGORITHMS
